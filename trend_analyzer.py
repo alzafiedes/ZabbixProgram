@@ -19,19 +19,22 @@ logger = logging.getLogger(__name__)
 class TrendAnalyzer:
     """Analyzes Zabbix item trends and generates AI conclusions."""
     
-    # DeepSeek API endpoint (OpenAI compatible)
+    # API endpoints (OpenAI-compatible chat completions)
     DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+    OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
     
-    def __init__(self, zabbix_api, deepseek_api_key: Optional[str] = None):
+    def __init__(self, zabbix_api, api_key: Optional[str] = None, ai_provider: str = "deepseek"):
         """
         Initialize the trend analyzer.
         
         Args:
             zabbix_api: Authenticated pyzabbix ZabbixAPI instance
-            deepseek_api_key: Optional DeepSeek API key for AI conclusions
+            api_key: Optional API key for AI conclusions
+            ai_provider: AI provider ('deepseek' or 'chatgpt')
         """
         self.api = zabbix_api
-        self.deepseek_api_key = deepseek_api_key
+        self.api_key = api_key
+        self.ai_provider = (ai_provider or "deepseek").lower()
     
     def get_trends(self, item_id: str, time_from: str, time_to: str) -> List[Dict]:
         """
@@ -221,7 +224,7 @@ class TrendAnalyzer:
     
     def get_ai_conclusion(self, summary: Dict) -> Optional[str]:
         """
-        Get AI conclusion from DeepSeek API.
+        Get AI conclusion from the configured provider.
         
         Args:
             summary: JSON summary of statistics
@@ -229,8 +232,8 @@ class TrendAnalyzer:
         Returns:
             AI-generated conclusion or None if failed
         """
-        if not self.deepseek_api_key:
-            logger.warning("No DeepSeek API key provided")
+        if not self.api_key:
+            logger.warning("No AI API key provided")
             return None
         
         stats = summary['statistics']
@@ -267,13 +270,17 @@ class TrendAnalyzer:
         Estructura obligatoria: Empieza con "Se revisa el {item_formatted}", describe los hallazgos de carga normal y menciona que los picos de saturación no son sostenidos o frecuentes. Escribe en un solo párrafo fluido."""
                 
         try:
+            provider_label = "DeepSeek" if self.ai_provider == "deepseek" else "ChatGPT"
+            api_url = self.DEEPSEEK_API_URL if self.ai_provider == "deepseek" else self.OPENAI_API_URL
+            model = "deepseek-chat" if self.ai_provider == "deepseek" else "gpt-4o-mini"
+
             headers = {
-                "Authorization": f"Bearer {self.deepseek_api_key}",
+                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
             
             payload = {
-                "model": "deepseek-chat",
+                "model": model,
                 "messages": [
                     {"role": "system", "content": "Eres un administrador de bases de datos. Responde con conclusiones descriptivas en párrafo, sin bullet points ni recomendaciones."},
                     {"role": "user", "content": prompt}
@@ -282,10 +289,10 @@ class TrendAnalyzer:
                 "temperature": 0.3
             }
             
-            logger.info("Sending request to DeepSeek API...")
+            logger.info(f"Sending request to {provider_label} API...")
             
             response = requests.post(
-                self.DEEPSEEK_API_URL,
+                api_url,
                 headers=headers,
                 json=payload,
                 timeout=30
@@ -295,15 +302,15 @@ class TrendAnalyzer:
             result = response.json()
             
             conclusion = result['choices'][0]['message']['content']
-            logger.info("Received AI conclusion")
+            logger.info(f"Received AI conclusion from {provider_label}")
             
             return conclusion.strip()
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"DeepSeek API error: {str(e)}")
+            logger.error(f"AI API error ({self.ai_provider}): {str(e)}")
             return None
         except (KeyError, IndexError) as e:
-            logger.error(f"Failed to parse DeepSeek response: {str(e)}")
+            logger.error(f"Failed to parse AI response ({self.ai_provider}): {str(e)}")
             return None
     
     def save_conclusion_txt(self, conclusion: str, stats: Dict, item_name: str, 
@@ -344,7 +351,8 @@ class TrendAnalyzer:
             f.write(f"   • Horas pico: {', '.join(stats.get('peak_hours', []))}\n")
             f.write(f"   • Días pico: {', '.join(stats.get('peak_days', []))}\n\n")
             
-            f.write("🤖 CONCLUSIÓN IA (DeepSeek):\n")
+            provider_label = "DeepSeek" if self.ai_provider == "deepseek" else "ChatGPT"
+            f.write(f"🤖 CONCLUSIÓN IA ({provider_label}):\n")
             f.write("-" * 40 + "\n")
             f.write(conclusion + "\n")
             f.write("-" * 40 + "\n\n")

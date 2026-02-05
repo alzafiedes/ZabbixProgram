@@ -295,10 +295,25 @@ class ZabbixExtractorApp(ctk.CTk):
         # Checkbox to enable conclusion
         self.conclusion_var = ctk.StringVar(value="0")
         self.conclusion_checkbox = ctk.CTkCheckBox(
-            right_frame, text="Generar Conclusión (DeepSeek)",
+            right_frame, text="Generar Conclusión con IA",
             variable=self.conclusion_var, onvalue="1", offvalue="0",
             command=self._on_conclusion_toggle)
         self.conclusion_checkbox.pack(anchor="w", padx=10, pady=2)
+
+        # AI provider selector
+        self.ai_provider_var = ctk.StringVar(value="deepseek")
+        provider_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+        provider_frame.pack(fill="x", padx=10, pady=(2, 2))
+        ctk.CTkLabel(provider_frame, text="Proveedor:",
+                     font=ctk.CTkFont(size=11)).pack(side="left", padx=(0, 5))
+        self.ai_provider_combo = ctk.CTkComboBox(
+            provider_frame,
+            values=["deepseek", "chatgpt"],
+            variable=self.ai_provider_var,
+            command=self._on_ai_provider_change,
+            width=130
+        )
+        self.ai_provider_combo.pack(side="left")
         
         # API Key entry (hidden by default)
         self.api_key_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
@@ -844,9 +859,16 @@ class ZabbixExtractorApp(ctk.CTk):
         """Handle conclusion checkbox toggle."""
         enabled = self.conclusion_var.get() == "1"
         if enabled:
-            self.ai_info_label.configure(text="✅ Análisis habilitado\n• CSV + estadísticas + IA")
+            provider = self.ai_provider_var.get()
+            provider_name = "DeepSeek" if provider == "deepseek" else "ChatGPT"
+            self.ai_info_label.configure(text=f"✅ Análisis habilitado ({provider_name})\n• CSV + estadísticas + IA")
         else:
             self.ai_info_label.configure(text="• Genera CSV + estadísticas\n• Conclusión técnica vía LLM")
+
+    def _on_ai_provider_change(self, _choice: str):
+        """Refresh AI section status text when provider changes."""
+        if self.conclusion_var.get() == "1":
+            self._on_conclusion_toggle()
     
     def _on_pdf_toggle(self):
         """Handle PDF checkbox toggle - show/hide config button."""
@@ -1043,6 +1065,8 @@ class ZabbixExtractorApp(ctk.CTk):
                 # Check if AI conclusion is enabled
                 generate_conclusion = self.conclusion_var.get() == "1"
                 api_key = self.api_key_entry.get().strip() if generate_conclusion else None
+                ai_provider = self.ai_provider_var.get()
+                provider_name = "DeepSeek" if ai_provider == "deepseek" else "ChatGPT"
                 trend_analyzer = None
                 
                 # Check if PDF report is enabled
@@ -1050,8 +1074,8 @@ class ZabbixExtractorApp(ctk.CTk):
                 pdf_generator = None
                 
                 if generate_conclusion:
-                    self._log_to_console("🤖 Análisis con IA habilitado")
-                    trend_analyzer = TrendAnalyzer(self.zabbix_client.api, api_key)
+                    self._log_to_console(f"🤖 Análisis con IA habilitado ({provider_name})")
+                    trend_analyzer = TrendAnalyzer(self.zabbix_client.api, api_key, ai_provider)
                 
                 output_dir = ChartDownloader.create_output_folder(self.base_path)
                 self._log_to_console(f"📁 Carpeta de salida: {output_dir}")
@@ -1107,7 +1131,7 @@ class ZabbixExtractorApp(ctk.CTk):
                             try:
                                 # Ensure trend_analyzer exists (create if only PDF is enabled)
                                 if not trend_analyzer:
-                                    trend_analyzer = TrendAnalyzer(self.zabbix_client.api, api_key)
+                                    trend_analyzer = TrendAnalyzer(self.zabbix_client.api, api_key, ai_provider)
                                 
                                 stats, conclusion, trends = trend_analyzer.analyze_item(
                                     item['itemid'], item['name'], host['name'],
@@ -1128,7 +1152,7 @@ class ZabbixExtractorApp(ctk.CTk):
                                         if line.strip():
                                             self._log_to_console(f"      {line.strip()}")
                                 elif api_key:
-                                    self._log_to_console(f"   ⚠️ No se pudo obtener conclusión de DeepSeek")
+                                    self._log_to_console(f"   ⚠️ No se pudo obtener conclusión de {provider_name}")
                                 
                                 # Add data to PDF generator
                                 if pdf_generator and trends:
